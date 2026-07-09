@@ -114,6 +114,9 @@
   .gridwrap{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
   .panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:8px 8px 4px}
   .panel .pt{font-size:12px;font-weight:620;text-align:center;margin:2px 0 2px;font-variant-numeric:tabular-nums}
+  a.pmlink{color:var(--opt);text-decoration:none;font-weight:600;white-space:nowrap}
+  a.pmlink:hover{text-decoration:underline}
+  #cdfLink a.pmlink{font-size:12px;font-weight:600;margin-left:8px}
   .banner{background:color-mix(in srgb,var(--warn) 16%,var(--card));border:1px solid color-mix(in srgb,var(--warn) 45%,var(--border));
     border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px;display:none}
   .banner code{background:var(--chip);padding:1px 6px;border-radius:5px}
@@ -126,6 +129,7 @@
 <!-- build_portable_dashboard.py injects a CSV snapshot between these tags to make
      a self-contained, no-server copy. Left empty here = live mode (fetches the CSV). -->
 <script id="embedded-data" type="text/plain"></script>
+<script id="embedded-links" type="application/json"></script>
 <div class="wrap">
   <header>
     <div>
@@ -199,7 +203,7 @@
     </div>
 
     <div class="card">
-      <h3>Probability curve — <span id="cdfTitle">—</span></h3>
+      <h3>Probability curve — <span id="cdfTitle">—</span><span id="cdfLink"></span></h3>
       <div class="cap">P(S<sub>T</sub> &gt; K) across strikes, latest snapshot. Line = option-implied, dots = Polymarket.</div>
       <div class="legend">
         <span><span class="sw" style="background:var(--opt)"></span>Option-implied</span>
@@ -262,6 +266,7 @@ const state = {
   focus: null,         // {asset,exp,strike} for history chart
   liquidOnly: true, exactOnly: true,
   timer: null, refreshMs: 30000,
+  links: {},           // "ASSET|EXP" -> polymarket event url
   view: "detail",      // "detail" | "grid"
   snaps: [],           // sorted unique snapshot timestamps
   snapIdx: 0,          // which snapshot the "current" views show
@@ -323,6 +328,20 @@ async function load(manualText){
     if(!state.rows.length) showBanner(e);
   }
 }
+
+async function loadLinks(){
+  const el=document.getElementById("embedded-links");
+  const emb=el?el.textContent.trim():"";
+  try{
+    if(emb.length>2){ state.links=JSON.parse(emb); }         // portable: baked in
+    else{
+      const r=await fetch("pm_links.json?t="+Date.now(),{cache:"no-store"});
+      if(r.ok) state.links=await r.json();                    // served: fetched
+    }
+  }catch(e){ state.links={}; }
+  if(state.rows.length) render();
+}
+function linkFor(asset,exp){ return (state.links&&state.links[asset+"|"+exp])||null; }
 
 function showBanner(e){
   const b=$("#banner");
@@ -434,6 +453,10 @@ function buildSelectors(latest){
   if(!exps.includes(state.exp)) state.exp = exps[0];
   selE.value = state.exp;
   $("#cdfTitle").textContent = state.asset+"  ·  "+state.exp;
+  const url=linkFor(state.asset,state.exp);
+  $("#cdfLink").innerHTML = url
+    ? `<a class="pmlink" href="${url}" target="_blank" rel="noopener" title="Open this market on Polymarket">↗ Polymarket</a>`
+    : "";
 }
 
 function drawKPIs(s, latest){
@@ -603,7 +626,17 @@ function drawGrid(cur){
     const [asset,exp]=k.split("|");
     const panel=document.createElement("div"); panel.className="panel";
     const title=document.createElement("div"); title.className="pt";
-    title.textContent=`${asset}  ${exp}`; panel.appendChild(title);
+    const url=linkFor(asset,exp);
+    if(url){
+      const a=document.createElement("a");
+      a.className="pmlink"; a.href=url; a.target="_blank"; a.rel="noopener";
+      a.textContent=`${asset}  ${exp} ↗`; a.title="Open this market on Polymarket";
+      a.addEventListener("click",ev=>ev.stopPropagation()); // link opens PM; panel body still jumps to detail
+      title.appendChild(a);
+    }else{
+      title.textContent=`${asset}  ${exp}`;
+    }
+    panel.appendChild(title);
     const svg=ns("svg",{viewBox:"0 0 240 150",role:"img","aria-label":`${asset} ${exp} probability curve`});
     panel.appendChild(svg);
     panel.style.cursor="pointer";
@@ -734,6 +767,7 @@ function markPortable(builtAt){
   }else{
     load(); schedule();              // live mode: fetch + auto-refresh
   }
+  loadLinks();                        // Polymarket event links (fetched or baked in)
 })();
 </script>
 </body>
