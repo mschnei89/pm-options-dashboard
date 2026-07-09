@@ -262,7 +262,7 @@ const EXACT_TIERS = new Set(["exact","exact_index"]);
 const state = {
   rows: [],            // all parsed rows
   lastGoodCount: 0,
-  asset: null, exp: null,
+  asset: "", exp: "",       // "" = "All" -- a real scope filter shared by every view
   focus: null,         // {asset,exp,strike} for history chart
   liquidOnly: true, exactOnly: true,
   timer: null, refreshMs: 30000,
@@ -414,20 +414,36 @@ function render(){
     `snapshot ${tsShort(cts)}${atLatest?" (latest)":` · ${state.snapIdx+1}/${N}`} · ${N} snapshots · ${cur.length} strikes`;
 
   buildSelectors(cur);
-  const kpiRows = cur.filter(r => (!state.exactOnly||EXACT_TIERS.has(r.tier)) && r.liquid);
+
+  // one shared scope, applied identically everywhere: Overlay grid, Detail
+  // scatter/table/KPIs, AND the single-market curve (whichever view is active).
+  const tierOk = r => !state.exactOnly || EXACT_TIERS.has(r.tier);
+  const inScope = r => (state.asset===""||r.asset===state.asset) && (state.exp===""||r.exp===state.exp);
+  const scoped = cur.filter(r => tierOk(r) && inScope(r));
+
+  const kpiRows = scoped.filter(r => r.liquid);
   drawKPIs(stats(kpiRows), kpiRows);
 
   if(state.view==="grid"){
     $("#gridTs").textContent = tsShort(cts)+(atLatest?" (latest)":"");
-    drawGrid(cur);
+    drawGrid(scoped);
   }else{
-    // rows used by scatter & table honor both toggles
-    const shown = cur.filter(r => (!state.exactOnly||EXACT_TIERS.has(r.tier)) && (!state.liquidOnly||r.liquid));
-    drawScatter(cur.filter(r=>!state.exactOnly||EXACT_TIERS.has(r.tier)));
+    const shown = scoped.filter(r => !state.liquidOnly || r.liquid);
+    drawScatter(scoped);
     drawTable(shown);
-    drawCDF(cur.filter(r=>r.asset===state.asset && r.exp===state.exp));
+    if(state.asset===""||state.exp===""){
+      emptyMsg($("#cdf"), 460, 400, "Select a Focus asset & Expiration above to see its curve");
+      $("#cdfLink").innerHTML = "";
+    }else{
+      drawCDF(scoped.filter(r=>r.asset===state.asset && r.exp===state.exp));
+    }
     drawHistory();  // history always spans the full timeline; a marker shows the cursor
   }
+}
+
+function emptyMsg(svg, W, H, text){
+  svgClear(svg);
+  svg.appendChild(ns("text",{x:W/2,y:H/2,"text-anchor":"middle",class:"axtitle"})).textContent=text;
 }
 
 function syncSlider(N, cts){
@@ -439,29 +455,41 @@ function syncSlider(N, cts){
 }
 
 function buildSelectors(latest){
-  const assets = uniq(latest.map(r=>r.asset)).sort();
+  // options are built from the TIER-filtered pool only, so a market excluded by
+  // "Exact-comparable only" can't even be selected while that filter is on
+  const pool = latest.filter(r => !state.exactOnly || EXACT_TIERS.has(r.tier));
+
+  const assets = uniq(pool.map(r=>r.asset)).sort();
   const selA=$("#selAsset");
-  if(selA.dataset.sig !== assets.join()){
-    selA.dataset.sig = assets.join();
-    selA.innerHTML = assets.map(a=>`<option>${a}</option>`).join("");
+  const asig = "A"+assets.join();
+  if(selA.dataset.sig !== asig){
+    selA.dataset.sig = asig;
+    selA.innerHTML = `<option value="">All assets</option>` + assets.map(a=>`<option value="${a}">${a}</option>`).join("");
   }
-  if(!assets.includes(state.asset)) state.asset = assets.includes("AAPL")?"AAPL":assets[0];
+  if(state.asset!=="" && !assets.includes(state.asset)) state.asset = "";
   selA.value = state.asset;
 
-  const exps = uniq(latest.filter(r=>r.asset===state.asset).map(r=>r.exp)).sort();
+  const expPool = state.asset==="" ? pool : pool.filter(r=>r.asset===state.asset);
+  const exps = uniq(expPool.map(r=>r.exp)).sort();
   const selE=$("#selExp");
   const sig=state.asset+"|"+exps.join();
   if(selE.dataset.sig !== sig){
     selE.dataset.sig=sig;
-    selE.innerHTML = exps.map(e=>`<option>${e}</option>`).join("");
+    selE.innerHTML = `<option value="">All expirations</option>` + exps.map(e=>`<option value="${e}">${e}</option>`).join("");
   }
-  if(!exps.includes(state.exp)) state.exp = exps[0];
+  if(state.exp!=="" && !exps.includes(state.exp)) state.exp = "";
   selE.value = state.exp;
-  $("#cdfTitle").textContent = state.asset+"  ·  "+state.exp;
-  const url=linkFor(state.asset,state.exp);
-  $("#cdfLink").innerHTML = url
-    ? `<a class="pmlink" href="${url}" target="_blank" rel="noopener" title="Open this market on Polymarket">↗ Polymarket</a>`
-    : "";
+
+  if(state.asset===""||state.exp===""){
+    $("#cdfTitle").textContent = "— select a market —";
+    $("#cdfLink").innerHTML = "";
+  }else{
+    $("#cdfTitle").textContent = state.asset+"  ·  "+state.exp;
+    const url=linkFor(state.asset,state.exp);
+    $("#cdfLink").innerHTML = url
+      ? `<a class="pmlink" href="${url}" target="_blank" rel="noopener" title="Open this market on Polymarket">↗ Polymarket</a>`
+      : "";
+  }
 }
 
 function drawKPIs(s, liquidRows){
@@ -546,11 +574,12 @@ function drawCDF(rows){
     svg.appendChild(ns("line",{x1:x(spot),y1:m.t,x2:x(spot),y2:H-m.b,stroke:"var(--spot)","stroke-width":1.4,"stroke-dasharray":"3 3"}));
     svg.appendChild(ns("text",{x:x(spot),y:m.t+11,"text-anchor":"middle",fill:"var(--spot)",class:"axlbl"})).textContent="spot "+spot.toFixed(2);
   }
-  // option curve
+  // option curve -- always from the FULL strike set (independent of PM liquidity)
   let d="";rs.forEach((r,i)=>{d+=(i?"L":"M")+x(r.strike)+" "+y(r.opt);});
   svg.appendChild(ns("path",{d,fill:"none",stroke:"var(--opt)","stroke-width":2}));
-  // PM dots
-  for(const r of rs){
+  // PM dots -- honors "Liquid strikes only"
+  const dotRows = state.liquidOnly ? rs.filter(r=>r.liquid) : rs;
+  for(const r of dotRows){
     const c=ns("circle",{cx:x(r.strike),cy:y(r.pm),r:4,
       fill:r.liquid?"var(--pm)":"none",stroke:"var(--pm)","stroke-width":1.4,opacity:r.liquid?1:.55});
     c.style.cursor="pointer";attachTip(c,r);c.addEventListener("click",()=>setFocus(r));
@@ -623,9 +652,12 @@ function drawHistory(){
 }
 
 // ---------- overlay grid (small multiples) ----------
-function drawGrid(cur){
+function drawGrid(rows){
+  // `rows` is already scoped (tier + Focus asset/expiration) by render(); the
+  // Liquid-strikes-only toggle is applied per-panel inside miniCDF (it hides
+  // PM dots but never removes strikes from the option curve, which doesn't
+  // depend on PM liquidity at all).
   const wrap=$("#gridwrap"); wrap.innerHTML="";
-  const rows=cur.filter(r=>!state.exactOnly||EXACT_TIERS.has(r.tier));
   // group by asset+exp
   const groups={};
   for(const r of rows){const k=r.asset+"|"+r.exp;(groups[k]=groups[k]||[]).push(r);}
@@ -674,9 +706,12 @@ function miniCDF(svg, rs){
   const spot=rs[0].spot;
   if(isFinite(spot)&&spot>=kmin-pad&&spot<=kmax+pad)
     svg.appendChild(ns("line",{x1:x(spot),y1:m.t,x2:x(spot),y2:H-m.b,stroke:"var(--spot)","stroke-width":1.2,"stroke-dasharray":"2 2"}));
+  // option curve -- always from the FULL strike set (independent of PM liquidity)
   let d="";rs.forEach((r,i)=>{d+=(i?"L":"M")+x(r.strike)+" "+y(r.opt);});
   svg.appendChild(ns("path",{d,fill:"none",stroke:"var(--opt)","stroke-width":1.8}));
-  for(const r of rs){const c=ns("circle",{cx:x(r.strike),cy:y(r.pm),r:3,
+  // PM dots -- honors "Liquid strikes only"
+  const dotRows = state.liquidOnly ? rs.filter(r=>r.liquid) : rs;
+  for(const r of dotRows){const c=ns("circle",{cx:x(r.strike),cy:y(r.pm),r:3,
     fill:r.liquid?"var(--pm)":"var(--grid)",stroke:r.liquid?"var(--surface)":"var(--muted)","stroke-width":1,opacity:r.liquid?1:.8});
     attachTip(c,r);svg.appendChild(c);}
 }
@@ -735,7 +770,7 @@ function stopPlay(){ state.playing=false; $("#playBtn").textContent="▶";
   if(state.playTimer)clearInterval(state.playTimer); state.playTimer=null; }
 
 // ---------- wiring ----------
-$("#selAsset").addEventListener("change",e=>{state.asset=e.target.value;state.exp=null;render();});
+$("#selAsset").addEventListener("change",e=>{state.asset=e.target.value;state.exp="";render();});
 $("#selExp").addEventListener("change",e=>{state.exp=e.target.value;render();});
 $("#chkLiquid").addEventListener("change",e=>{state.liquidOnly=e.target.checked;render();});
 $("#chkExact").addEventListener("change",e=>{state.exactOnly=e.target.checked;render();});
