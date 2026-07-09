@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM vs Options — Live</title>
+<style>
+  /* ---- palette (validated dataviz defaults), light + dark ---- */
+  :root{
+    --plane:#f9f9f7; --surface:#fcfcfb; --card:#ffffff;
+    --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+    --pm:#e34948;      /* Polymarket (red)  */
+    --opt:#2a78d6;     /* Option-implied (blue) */
+    --divlo:#2a78d6; --divmid:#f0efec; --divhi:#e34948;  /* diverging diff */
+    --good:#0ca30c; --warn:#fab219; --crit:#d03b3b;
+    --spot:#008300;
+    --chip:#f0efec;
+  }
+  :root[data-theme="dark"]{
+    --plane:#0d0d0d; --surface:#1a1a19; --card:#1f1f1e;
+    --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+    --pm:#e66767; --opt:#3987e5;
+    --divlo:#3987e5; --divmid:#383835; --divhi:#e66767;
+    --good:#0ca30c; --warn:#fab219; --crit:#d03b3b;
+    --spot:#3ea33e; --chip:#2c2c2a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --plane:#0d0d0d; --surface:#1a1a19; --card:#1f1f1e;
+      --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+      --pm:#e66767; --opt:#3987e5;
+      --divlo:#3987e5; --divmid:#383835; --divhi:#e66767;
+      --spot:#3ea33e; --chip:#2c2c2a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);
+    font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  h1,h2,h3{margin:0;font-weight:650}
+  a{color:var(--opt)}
+  .wrap{max-width:1360px;margin:0 auto;padding:18px 20px 60px}
+  header{display:flex;flex-wrap:wrap;align-items:baseline;gap:14px;justify-content:space-between;margin-bottom:6px}
+  header .sub{color:var(--ink2);font-size:12.5px}
+  .status{display:flex;align-items:center;gap:14px;font-size:12.5px;color:var(--ink2)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block;transition:background .3s}
+  .dot.live{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 22%,transparent)}
+  .dot.err{background:var(--crit);box-shadow:0 0 0 3px color-mix(in srgb,var(--crit) 22%,transparent)}
+  .dot.stale{background:var(--warn)}
+  /* controls */
+  .controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;
+    background:var(--card);border:1px solid var(--border);border-radius:12px;padding:11px 14px;margin:12px 0 16px}
+  .controls label{display:flex;align-items:center;gap:7px;color:var(--ink2);font-size:12.5px;white-space:nowrap}
+  select,button{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--border);
+    border-radius:8px;padding:5px 9px;cursor:pointer}
+  button:hover,select:hover{border-color:var(--axis)}
+  input[type=checkbox]{accent-color:var(--opt);width:15px;height:15px}
+  .spacer{flex:1}
+  .btn-ghost{background:transparent}
+  /* kpis */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:16px}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px}
+  .kpi .k{font-size:11px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted)}
+  .kpi .v{font-size:26px;font-weight:660;margin-top:3px;font-variant-numeric:tabular-nums}
+  .kpi .u{font-size:11.5px;color:var(--ink2);margin-top:1px}
+  /* grid of cards */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:920px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px 10px;min-width:0}
+  .card h3{font-size:14px;margin-bottom:2px}
+  .card .cap{color:var(--ink2);font-size:12px;margin-bottom:8px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink2);margin:2px 0 8px}
+  .legend .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  .ax{stroke:var(--axis);stroke-width:1}
+  .gl{stroke:var(--grid);stroke-width:1}
+  .axlbl{fill:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+  .axtitle{fill:var(--ink2);font-size:12px}
+  /* table */
+  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:12.5px}
+  th,td{text-align:right;padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.02em;cursor:default}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:color-mix(in srgb,var(--opt) 8%,transparent)}
+  tbody tr.sel{background:color-mix(in srgb,var(--opt) 14%,transparent)}
+  .pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600}
+  .tableWrap{overflow-x:auto}
+  .diffcell{font-weight:600}
+  /* tooltip */
+  #tip{position:fixed;pointer-events:none;z-index:50;background:var(--card);border:1px solid var(--border);
+    border-radius:9px;padding:7px 10px;font-size:12px;box-shadow:0 6px 20px rgba(0,0,0,.18);opacity:0;transition:opacity .08s;max-width:240px}
+  #tip .t{font-weight:650;margin-bottom:3px}
+  #tip .r{display:flex;justify-content:space-between;gap:14px;color:var(--ink2)}
+  #tip .r b{color:var(--ink);font-variant-numeric:tabular-nums}
+  .note{color:var(--ink2);font-size:12px;margin-top:6px}
+  /* segmented view control */
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .seg button{border:0;border-radius:0;background:transparent;padding:5px 12px}
+  .seg button+button{border-left:1px solid var(--border)}
+  .seg button.on{background:var(--opt);color:#fff}
+  /* time slider bar */
+  .timebar{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--border);
+    border-radius:12px;padding:10px 14px;margin:0 0 16px}
+  .timebar input[type=range]{flex:1;accent-color:var(--opt);cursor:pointer;height:22px}
+  .timebar .tlab{font-size:12.5px;color:var(--ink2);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:150px}
+  .timebar .tlab b{color:var(--ink)}
+  .pinbtn{font-size:11.5px}
+  .pinbtn.on{background:var(--opt);color:#fff;border-color:var(--opt)}
+  /* overlay grid of small multiples */
+  #gridView{display:none}
+  .gridwrap{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:8px 8px 4px}
+  .panel .pt{font-size:12px;font-weight:620;text-align:center;margin:2px 0 2px;font-variant-numeric:tabular-nums}
+  .banner{background:color-mix(in srgb,var(--warn) 16%,var(--card));border:1px solid color-mix(in srgb,var(--warn) 45%,var(--border));
+    border-radius:10px;padding:12px 14px;margin:12px 0;font-size:13px;display:none}
+  .banner code{background:var(--chip);padding:1px 6px;border-radius:5px}
+  .mono{font-variant-numeric:tabular-nums}
+  .fade{opacity:.45}
+  footer{margin-top:26px;color:var(--muted);font-size:11.5px;line-height:1.6}
+</style>
+</head>
+<body>
+<!-- build_portable_dashboard.py injects a CSV snapshot between these tags to make
+     a self-contained, no-server copy. Left empty here = live mode (fetches the CSV). -->
+<script id="embedded-data" type="text/plain"></script>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Prediction Markets vs Options — Live</h1>
+      <div class="sub">Risk-neutral P(S<sub>T</sub> &gt; K): Polymarket YES vs Schwab option-implied (Breeden–Litzenberger digital). Read-only view of the growing live panel.</div>
+    </div>
+    <div class="status">
+      <span id="snapinfo">loading…</span>
+      <span><span class="dot" id="dot"></span> <span id="statustxt">connecting</span></span>
+      <button class="btn-ghost" id="themeBtn" title="Toggle theme">◐</button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="controls">
+    <span class="seg" id="viewSeg">
+      <button data-view="detail" class="on">Detail</button>
+      <button data-view="grid">Overlay grid</button>
+    </span>
+    <label>Focus asset
+      <select id="selAsset"></select>
+    </label>
+    <label>Expiration
+      <select id="selExp"></select>
+    </label>
+    <label><input type="checkbox" id="chkLiquid" checked> Liquid strikes only</label>
+    <label><input type="checkbox" id="chkExact" checked> Exact-comparable only</label>
+    <span class="spacer"></span>
+    <label>Refresh
+      <select id="selRefresh">
+        <option value="0">off</option>
+        <option value="10000">10 s</option>
+        <option value="30000" selected>30 s</option>
+        <option value="60000">60 s</option>
+      </select>
+    </label>
+    <button id="refreshBtn">↻ Refresh now</button>
+    <input type="file" id="fileIn" accept=".csv" style="display:none">
+    <button class="btn-ghost" id="fileBtn" title="Load a CSV snapshot manually (no server needed)">Load file…</button>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="timebar">
+    <button id="playBtn" title="Animate through snapshots">▶</button>
+    <input type="range" id="slider" min="0" max="0" value="0" step="1" aria-label="snapshot time">
+    <span class="tlab">Snapshot <b id="slLab">—</b> <span id="slPin"></span></span>
+    <button class="pinbtn on" id="pinBtn" title="Follow the newest snapshot as it arrives">Live ●</button>
+  </div>
+
+  <div id="gridView">
+    <div class="card" style="padding:12px 14px 10px">
+      <h3>Probability curves — all markets · <span id="gridTs">—</span></h3>
+      <div class="cap">One panel per market at the selected snapshot. Line = option-implied P(S<sub>T</sub>&gt;K); dots = Polymarket YES (red = liquid, gray = stale); green dotted = spot. Drag the slider or hit ▶ to watch them move.</div>
+      <div class="gridwrap" id="gridwrap"></div>
+    </div>
+  </div>
+
+  <div class="grid" id="detailView">
+    <div class="card">
+      <h3>Calibration — latest snapshot</h3>
+      <div class="cap">Each dot = one strike. On the 45° line the two markets agree. Color = PM − option (who is richer).</div>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--divhi)"></span>PM richer</span>
+        <span><span class="sw" style="background:var(--divmid);border:1px solid var(--border)"></span>agree</span>
+        <span><span class="sw" style="background:var(--divlo)"></span>Option richer</span>
+        <span class="fade">hollow = illiquid / stale PM</span>
+      </div>
+      <svg id="scatter" viewBox="0 0 460 400" role="img" aria-label="calibration scatter"></svg>
+    </div>
+
+    <div class="card">
+      <h3>Probability curve — <span id="cdfTitle">—</span></h3>
+      <div class="cap">P(S<sub>T</sub> &gt; K) across strikes, latest snapshot. Line = option-implied, dots = Polymarket.</div>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--opt)"></span>Option-implied</span>
+        <span><span class="sw" style="background:var(--pm)"></span>Polymarket YES</span>
+        <span><span class="sw" style="background:var(--spot)"></span>spot</span>
+      </div>
+      <svg id="cdf" viewBox="0 0 460 400" role="img" aria-label="probability vs strike"></svg>
+    </div>
+
+    <div class="card">
+      <h3>Biggest divergences — latest snapshot</h3>
+      <div class="cap">Largest |PM − option| among the shown strikes. Click a row to chart its history →</div>
+      <div class="tableWrap">
+        <table id="tbl">
+          <thead><tr>
+            <th>Asset</th><th>Exp</th><th>Strike</th><th>Spot</th>
+            <th>PM</th><th>Option</th><th>PM−Opt</th><th>Liq</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>History — <span id="tsTitle">select a contract</span></h3>
+      <div class="cap">How this one strike's two probabilities move across every snapshot.</div>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--pm)"></span>Polymarket YES</span>
+        <span><span class="sw" style="background:var(--opt)"></span>Option-implied</span>
+      </div>
+      <svg id="ts" viewBox="0 0 460 360" role="img" aria-label="probability history"></svg>
+      <div class="note" id="tsNote"></div>
+    </div>
+  </div>
+
+  <footer>
+    Source: <span class="mono">results/panel/pm_vs_options_panel_LIVE.csv</span> (written by <span class="mono">snapshot_live.py</span>).
+    This page only <b>reads</b> that file — it never fetches, writes, or touches the Schwab API, so it cannot disturb the collection loop.
+    Polymarket side is live per snapshot; the option side is only as fresh as the last Schwab chain pull for that run.
+  </footer>
+</div>
+
+<div id="tip"></div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// Config. Path is relative so it resolves when the project root is served
+// (e.g. `python -m http.server 8080` from 20260708_New_Assets, then open
+// http://localhost:8080/live_dashboard.html). Override with ?src=<url>.
+// ---------------------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const SRC = params.get("src") || "results/panel/pm_vs_options_panel_LIVE.csv";
+const EXACT_TIERS = new Set(["exact","exact_index"]);
+
+const state = {
+  rows: [],            // all parsed rows
+  lastGoodCount: 0,
+  asset: null, exp: null,
+  focus: null,         // {asset,exp,strike} for history chart
+  liquidOnly: true, exactOnly: true,
+  timer: null, refreshMs: 30000,
+  view: "detail",      // "detail" | "grid"
+  snaps: [],           // sorted unique snapshot timestamps
+  snapIdx: 0,          // which snapshot the "current" views show
+  pinned: true,        // follow the newest snapshot as it arrives
+  playing: false, playTimer: null
+};
+
+const $ = s => document.querySelector(s);
+const tip = $("#tip");
+
+// ---------- CSV ----------
+function parseCSV(text){
+  const lines = text.split(/\r?\n/).filter(l => l.length);
+  if(lines.length < 2) throw new Error("empty");
+  const head = lines[0].split(",");
+  const idx = {}; head.forEach((h,i)=>idx[h.trim()]=i);
+  const need = ["snapshot_ts_utc","asset","expiration","tier","strike","pm_yes","opt_prob","spot","diff","liquid"];
+  for(const k of need) if(!(k in idx)) throw new Error("missing column "+k);
+  const out = [];
+  for(let i=1;i<lines.length;i++){
+    const c = lines[i].split(",");
+    if(c.length < head.length) continue;               // torn/partial line — skip
+    const strike = +c[idx.strike], pm = +c[idx.pm_yes], opt = +c[idx.opt_prob];
+    if(!isFinite(strike) || !isFinite(pm) || !isFinite(opt)) continue;
+    out.push({
+      ts: c[idx.snapshot_ts_utc],
+      asset: c[idx.asset], exp: c[idx.expiration], tier: c[idx.tier],
+      strike, pm, opt, spot:+c[idx.spot], diff:+c[idx.diff],
+      liquid: String(c[idx.liquid]).toLowerCase()==="true"
+    });
+  }
+  if(!out.length) throw new Error("no data rows");
+  return out;
+}
+
+async function load(manualText){
+  const dot=$("#dot"), st=$("#statustxt");
+  try{
+    let text;
+    if(manualText != null){ text = manualText; }
+    else{
+      const r = await fetch(SRC + (SRC.includes("?")?"&":"?") + "t=" + Date.now(), {cache:"no-store"});
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      text = await r.text();
+    }
+    const rows = parseCSV(text);
+    // torn-read guard: if the file shrank a lot mid-write, keep the last good copy
+    if(state.lastGoodCount && rows.length < state.lastGoodCount*0.6 && manualText==null){
+      dot.className="dot stale"; st.textContent="partial read — kept last";
+      return;
+    }
+    state.rows = rows; state.lastGoodCount = rows.length;
+    dot.className="dot live";
+    st.textContent = "live";
+    $("#banner").style.display="none";
+    render();
+  }catch(e){
+    dot.className="dot err"; st.textContent="no data";
+    if(!state.rows.length) showBanner(e);
+  }
+}
+
+function showBanner(e){
+  const b=$("#banner");
+  b.style.display="block";
+  b.innerHTML = `<b>Can't read the data</b> — it looks like this page was opened as a file. `+
+    `A browser won't let a <code>file://</code> page read the CSV, so start the tiny read-only server first `+
+    `(it can't disturb the collection loop). In PowerShell, run:<br>`+
+    `<code>python -m http.server 8080 --directory "C:\\Users\\mschn\\OneDrive - University of Denver\\Schneider Dissertation\\Compass\\zProjects\\202607\\20260708_New_Assets"</code><br>`+
+    `then open <code>http://localhost:8080/live_dashboard.html</code> (not the file). `+
+    `No-server alternative: click <b>Load file…</b> above to inspect one snapshot CSV manually. `+
+    `<span style="color:var(--muted)">(${e.message})</span>`;
+}
+
+// ---------- helpers ----------
+const fmtPct = v => (v*100).toFixed(1)+"%";
+const fmtPP  = v => (v>=0?"+":"")+(v*100).toFixed(1)+" pp";
+const uniq = a => [...new Set(a)];
+function latestTs(rows){ let m=""; for(const r of rows) if(r.ts>m) m=r.ts; return m; }
+function tsShort(iso){ const d=new Date(iso); if(isNaN(d)) return iso;
+  return d.toLocaleString([], {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+
+function lerp(a,b,t){return a+(b-a)*t;}
+function hex2rgb(h){h=h.trim();if(h[0]==="#")h=h.slice(1);
+  if(h.length===3)h=h.split("").map(c=>c+c).join("");
+  return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+function rgb2css(a){return `rgb(${a.map(Math.round).join(",")})`;}
+function cssvar(n){return getComputedStyle(document.body).getPropertyValue(n).trim();}
+// diverging color for diff, domain clamped to +/-0.25
+function diffColor(d){
+  const lo=hex2rgb(cssvar("--divlo")), mid=hex2rgb(cssvar("--divmid")), hi=hex2rgb(cssvar("--divhi"));
+  let t=Math.max(-1,Math.min(1, d/0.25));
+  const e = t<0 ? lo : hi, tt=Math.abs(t);
+  return rgb2css([0,1,2].map(i=>lerp(mid[i], e[i], tt)));
+}
+
+// ---------- stats ----------
+function stats(rows){
+  const n=rows.length;
+  if(!n) return {n:0};
+  let s=0,s2=0; for(const r of rows){s+=r.diff;s2+=r.diff*r.diff;}
+  const bias=s/n, rmse=Math.sqrt(s2/n);
+  let mae=0; for(const r of rows) mae+=Math.abs(r.diff); mae/=n;
+  // corr(pm,opt)
+  let mx=0,my=0; for(const r of rows){mx+=r.pm;my+=r.opt;} mx/=n;my/=n;
+  let sxy=0,sxx=0,syy=0;
+  for(const r of rows){const dx=r.pm-mx,dy=r.opt-my;sxy+=dx*dy;sxx+=dx*dx;syy+=dy*dy;}
+  const corr = (sxx>0&&syy>0)? sxy/Math.sqrt(sxx*syy):NaN;
+  return {n,mae,rmse,bias,corr};
+}
+
+// ---------- rendering ----------
+function render(){
+  if(!state.rows.length) return;
+  // discrete snapshot timeline
+  state.snaps = uniq(state.rows.map(r=>r.ts)).sort();
+  const N = state.snaps.length;
+  if(state.pinned) state.snapIdx = N-1;
+  state.snapIdx = Math.max(0, Math.min(N-1, state.snapIdx));
+  const cts = state.snaps[state.snapIdx];
+  const cur = state.rows.filter(r=>r.ts===cts);
+
+  syncSlider(N, cts);
+  const atLatest = state.snapIdx===N-1;
+  $("#snapinfo").textContent =
+    `snapshot ${tsShort(cts)}${atLatest?" (latest)":` · ${state.snapIdx+1}/${N}`} · ${N} snapshots · ${cur.length} strikes`;
+
+  buildSelectors(cur);
+  const kpiRows = cur.filter(r => (!state.exactOnly||EXACT_TIERS.has(r.tier)) && r.liquid);
+  drawKPIs(stats(kpiRows), cur);
+
+  if(state.view==="grid"){
+    $("#gridTs").textContent = tsShort(cts)+(atLatest?" (latest)":"");
+    drawGrid(cur);
+  }else{
+    // rows used by scatter & table honor both toggles
+    const shown = cur.filter(r => (!state.exactOnly||EXACT_TIERS.has(r.tier)) && (!state.liquidOnly||r.liquid));
+    drawScatter(cur.filter(r=>!state.exactOnly||EXACT_TIERS.has(r.tier)));
+    drawTable(shown);
+    drawCDF(cur.filter(r=>r.asset===state.asset && r.exp===state.exp));
+    drawHistory();  // history always spans the full timeline; a marker shows the cursor
+  }
+}
+
+function syncSlider(N, cts){
+  const sl=$("#slider");
+  sl.max = Math.max(N-1,0); sl.value = state.snapIdx;
+  $("#slLab").textContent = tsShort(cts);
+  $("#pinBtn").classList.toggle("on", state.pinned);
+  $("#pinBtn").textContent = state.pinned ? "Live ●" : "Live ○";
+}
+
+function buildSelectors(latest){
+  const assets = uniq(latest.map(r=>r.asset)).sort();
+  const selA=$("#selAsset");
+  if(selA.dataset.sig !== assets.join()){
+    selA.dataset.sig = assets.join();
+    selA.innerHTML = assets.map(a=>`<option>${a}</option>`).join("");
+  }
+  if(!assets.includes(state.asset)) state.asset = assets.includes("AAPL")?"AAPL":assets[0];
+  selA.value = state.asset;
+
+  const exps = uniq(latest.filter(r=>r.asset===state.asset).map(r=>r.exp)).sort();
+  const selE=$("#selExp");
+  const sig=state.asset+"|"+exps.join();
+  if(selE.dataset.sig !== sig){
+    selE.dataset.sig=sig;
+    selE.innerHTML = exps.map(e=>`<option>${e}</option>`).join("");
+  }
+  if(!exps.includes(state.exp)) state.exp = exps[0];
+  selE.value = state.exp;
+  $("#cdfTitle").textContent = state.asset+"  ·  "+state.exp;
+}
+
+function drawKPIs(s, latest){
+  const arb = latest.filter(r=>EXACT_TIERS.has(r.tier)&&r.liquid)
+                    .reduce((m,r)=>Math.abs(r.diff)>Math.abs(m.diff)?r:m,{diff:0});
+  const cards=[
+    ["Liquid strikes", s.n||0, "exact-comparable"],
+    ["MAE", s.n?fmtPct(s.mae):"—", "mean |PM−opt|"],
+    ["RMSE", s.n?fmtPct(s.rmse):"—", "root-mean-sq"],
+    ["Correlation", s.n?(isFinite(s.corr)?s.corr.toFixed(3):"—"):"—", "PM vs option"],
+    ["Bias", s.n?fmtPP(s.bias):"—", "PM − option"],
+    ["Widest gap", arb.asset?fmtPP(arb.diff):"—", arb.asset?`${arb.asset} $${arb.strike}`:"—"],
+  ];
+  $("#kpis").innerHTML = cards.map(([k,v,u])=>{
+    let col="";
+    if(k==="Bias"||k==="Widest gap"){ col = `style="color:${diffColor(typeof v==='string'?0:0)}"`; }
+    return `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="u">${u}</div></div>`;
+  }).join("");
+}
+
+// generic linear scale
+const scale=(d0,d1,r0,r1)=>v=>r0+(v-d0)/(d1-d0)*(r1-r0);
+
+function svgClear(el){while(el.firstChild)el.removeChild(el.firstChild);}
+function ns(tag,attrs){const e=document.createElementNS("http://www.w3.org/2000/svg",tag);
+  for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+
+function drawScatter(rows){
+  const svg=$("#scatter"); svgClear(svg);
+  const W=460,H=400,m={l:44,r:12,t:8,b:40};
+  const x=scale(0,1,m.l,W-m.r), y=scale(0,1,H-m.b,m.t);
+  // grid + 45 line
+  for(let i=0;i<=10;i++){const g=i/10;
+    svg.appendChild(ns("line",{x1:x(g),y1:m.t,x2:x(g),y2:H-m.b,class:"gl"}));
+    svg.appendChild(ns("line",{x1:m.l,y1:y(g),x2:W-m.r,y2:y(g),class:"gl"}));
+    if(i%2===0){
+      svg.appendChild(ns("text",{x:x(g),y:H-m.b+15,"text-anchor":"middle",class:"axlbl"})).textContent=g.toFixed(1);
+      svg.appendChild(ns("text",{x:m.l-6,y:y(g)+3,"text-anchor":"end",class:"axlbl"})).textContent=g.toFixed(1);
+    }
+  }
+  svg.appendChild(ns("line",{x1:x(0),y1:y(0),x2:x(1),y2:y(1),stroke:"var(--axis)","stroke-width":1.5,"stroke-dasharray":"4 4"}));
+  svg.appendChild(ns("rect",{x:m.l,y:m.t,width:W-m.r-m.l,height:H-m.b-m.t,fill:"none",stroke:"var(--axis)","stroke-width":1}));
+  // axis titles
+  const xt=ns("text",{x:(m.l+W-m.r)/2,y:H-4,"text-anchor":"middle",class:"axtitle"});xt.textContent="Option-implied  Q(S > K)";svg.appendChild(xt);
+  const yt=ns("text",{x:12,y:(m.t+H-m.b)/2,"text-anchor":"middle",class:"axtitle",transform:`rotate(-90 12 ${(m.t+H-m.b)/2})`});yt.textContent="Polymarket YES  P(S > K)";svg.appendChild(yt);
+  // points: illiquid first (behind)
+  const ordered=[...rows].sort((a,b)=>(a.liquid?1:0)-(b.liquid?1:0));
+  for(const r of ordered){
+    const c=ns("circle",{cx:x(r.opt),cy:y(r.pm),r:r.liquid?4.5:3.5,
+      fill:r.liquid?diffColor(r.diff):"none",
+      stroke:r.liquid?"var(--surface)":"var(--muted)","stroke-width":r.liquid?1:1.2,
+      opacity:r.liquid?0.95:0.6});
+    c.style.cursor="pointer";
+    attachTip(c,r);
+    c.addEventListener("click",()=>{setFocus(r);});
+    svg.appendChild(c);
+  }
+}
+
+function drawCDF(rows){
+  const svg=$("#cdf"); svgClear(svg);
+  const W=460,H=400,m={l:44,r:12,t:8,b:40};
+  if(!rows.length){svg.appendChild(ns("text",{x:W/2,y:H/2,"text-anchor":"middle",class:"axtitle"})).textContent="no overlapping strikes for this market";return;}
+  const rs=[...rows].sort((a,b)=>a.strike-b.strike);
+  const ks=rs.map(r=>r.strike), kmin=Math.min(...ks), kmax=Math.max(...ks);
+  const pad=(kmax-kmin)*0.04||1;
+  const x=scale(kmin-pad,kmax+pad,m.l,W-m.r), y=scale(0,1,H-m.b,m.t);
+  for(let i=0;i<=10;i++){const g=i/10;
+    svg.appendChild(ns("line",{x1:m.l,y1:y(g),x2:W-m.r,y2:y(g),class:"gl"}));
+    if(i%2===0)svg.appendChild(ns("text",{x:m.l-6,y:y(g)+3,"text-anchor":"end",class:"axlbl"})).textContent=g.toFixed(1);
+  }
+  // x ticks (5)
+  for(let i=0;i<=4;i++){const kv=kmin+(kmax-kmin)*i/4;
+    svg.appendChild(ns("line",{x1:x(kv),y1:m.t,x2:x(kv),y2:H-m.b,class:"gl"}));
+    svg.appendChild(ns("text",{x:x(kv),y:H-m.b+15,"text-anchor":"middle",class:"axlbl"})).textContent=kv.toFixed(kmax<20?1:0);
+  }
+  svg.appendChild(ns("rect",{x:m.l,y:m.t,width:W-m.r-m.l,height:H-m.b-m.t,fill:"none",stroke:"var(--axis)","stroke-width":1}));
+  // spot line
+  const spot=rs[0].spot;
+  if(isFinite(spot)&&spot>=kmin-pad&&spot<=kmax+pad){
+    svg.appendChild(ns("line",{x1:x(spot),y1:m.t,x2:x(spot),y2:H-m.b,stroke:"var(--spot)","stroke-width":1.4,"stroke-dasharray":"3 3"}));
+    svg.appendChild(ns("text",{x:x(spot),y:m.t+11,"text-anchor":"middle",fill:"var(--spot)",class:"axlbl"})).textContent="spot "+spot.toFixed(2);
+  }
+  // option curve
+  let d="";rs.forEach((r,i)=>{d+=(i?"L":"M")+x(r.strike)+" "+y(r.opt);});
+  svg.appendChild(ns("path",{d,fill:"none",stroke:"var(--opt)","stroke-width":2}));
+  // PM dots
+  for(const r of rs){
+    const c=ns("circle",{cx:x(r.strike),cy:y(r.pm),r:4,
+      fill:r.liquid?"var(--pm)":"none",stroke:"var(--pm)","stroke-width":1.4,opacity:r.liquid?1:.55});
+    c.style.cursor="pointer";attachTip(c,r);c.addEventListener("click",()=>setFocus(r));
+    svg.appendChild(c);
+  }
+  const xt=ns("text",{x:(m.l+W-m.r)/2,y:H-4,"text-anchor":"middle",class:"axtitle"});xt.textContent="strike K";svg.appendChild(xt);
+}
+
+function drawTable(rows){
+  const top=[...rows].sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff)).slice(0,14);
+  const tb=$("#tbl tbody"); tb.innerHTML="";
+  for(const r of top){
+    const tr=document.createElement("tr");
+    if(state.focus && r.asset===state.focus.asset && r.exp===state.focus.exp && r.strike===state.focus.strike) tr.className="sel";
+    tr.innerHTML=`<td>${r.asset}</td><td>${r.exp.slice(5)}</td><td>$${r.strike}</td>`+
+      `<td>${isFinite(r.spot)?r.spot.toFixed(2):"—"}</td>`+
+      `<td>${fmtPct(r.pm)}</td><td>${fmtPct(r.opt)}</td>`+
+      `<td class="diffcell" style="color:${diffColor(r.diff)}">${fmtPP(r.diff)}</td>`+
+      `<td>${r.liquid?'<span class="pill" style="background:color-mix(in srgb,var(--good) 20%,transparent);color:var(--good)">liq</span>':'<span class="pill fade">—</span>'}</td>`;
+    tr.addEventListener("click",()=>setFocus(r));
+    tb.appendChild(tr);
+  }
+  if(!top.length) tb.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:16px">no strikes match the current filters</td></tr>`;
+}
+
+function drawHistory(){
+  const svg=$("#ts"); svgClear(svg);
+  const W=460,H=360,m={l:44,r:12,t:10,b:44};
+  const f=state.focus;
+  if(!f){svg.appendChild(ns("text",{x:W/2,y:H/2,"text-anchor":"middle",class:"axtitle"})).textContent="click a strike above to see its history";return;}
+  const series=state.rows.filter(r=>r.asset===f.asset&&r.exp===f.exp&&r.strike===f.strike)
+                         .sort((a,b)=>a.ts<b.ts?-1:1);
+  $("#tsTitle").textContent=`${f.asset} ${f.exp} · $${f.strike}`;
+  if(series.length<1){svg.appendChild(ns("text",{x:W/2,y:H/2,"text-anchor":"middle",class:"axtitle"})).textContent="no history";return;}
+  const t0=new Date(series[0].ts).getTime(), t1=new Date(series[series.length-1].ts).getTime();
+  const span=Math.max(t1-t0,1);
+  const x=scale(0,span,m.l,W-m.r), y=scale(0,1,H-m.b,m.t);
+  const X=r=>x(new Date(r.ts).getTime()-t0);
+  for(let i=0;i<=10;i++){const g=i/10;
+    svg.appendChild(ns("line",{x1:m.l,y1:y(g),x2:W-m.r,y2:y(g),class:"gl"}));
+    if(i%2===0)svg.appendChild(ns("text",{x:m.l-6,y:y(g)+3,"text-anchor":"end",class:"axlbl"})).textContent=g.toFixed(1);
+  }
+  // time ticks
+  const nt=Math.min(series.length,5);
+  for(let i=0;i<nt;i++){const r=series[Math.round(i*(series.length-1)/(nt-1||1))];
+    svg.appendChild(ns("text",{x:X(r),y:H-m.b+16,"text-anchor":"middle",class:"axlbl"})).textContent=tsShort(r.ts).split(",").pop().trim();
+  }
+  svg.appendChild(ns("rect",{x:m.l,y:m.t,width:W-m.r-m.l,height:H-m.b-m.t,fill:"none",stroke:"var(--axis)","stroke-width":1}));
+  const line=(key,col)=>{
+    let d="";series.forEach((r,i)=>{d+=(i?"L":"M")+X(r)+" "+y(r[key]);});
+    if(series.length>1) svg.appendChild(ns("path",{d,fill:"none",stroke:col,"stroke-width":2}));
+    for(const r of series){const c=ns("circle",{cx:X(r),cy:y(r[key]),r:3.2,fill:col,stroke:"var(--surface)","stroke-width":1});
+      attachTip(c,r,key==="pm"?"Polymarket":"Option");svg.appendChild(c);}
+  };
+  line("opt","var(--opt)");
+  line("pm","var(--pm)");
+  const xt=ns("text",{x:(m.l+W-m.r)/2,y:H-4,"text-anchor":"middle",class:"axtitle"});xt.textContent="snapshot time";svg.appendChild(xt);
+  // cursor marker at the snapshot the slider is parked on
+  const cts=state.snaps[state.snapIdx];
+  if(cts){const cx=X({ts:cts});
+    if(cx>=m.l&&cx<=W-m.r) svg.appendChild(ns("line",{x1:cx,y1:m.t,x2:cx,y2:H-m.b,
+      stroke:"var(--muted)","stroke-width":1,"stroke-dasharray":"2 3"}));
+  }
+  const last=series[series.length-1];
+  $("#tsNote").textContent=`${series.length} snapshot(s) · latest PM ${fmtPct(last.pm)} vs option ${fmtPct(last.opt)} (gap ${fmtPP(last.diff)}).`;
+}
+
+// ---------- overlay grid (small multiples) ----------
+function drawGrid(cur){
+  const wrap=$("#gridwrap"); wrap.innerHTML="";
+  const rows=cur.filter(r=>!state.exactOnly||EXACT_TIERS.has(r.tier));
+  // group by asset+exp
+  const groups={};
+  for(const r of rows){const k=r.asset+"|"+r.exp;(groups[k]=groups[k]||[]).push(r);}
+  const keys=Object.keys(groups).filter(k=>groups[k].length>=2)
+    .sort((a,b)=>a<b?-1:1);
+  if(!keys.length){wrap.innerHTML=`<div class="note" style="grid-column:1/-1">no markets match the current filters at this snapshot</div>`;return;}
+  for(const k of keys){
+    const [asset,exp]=k.split("|");
+    const panel=document.createElement("div"); panel.className="panel";
+    const title=document.createElement("div"); title.className="pt";
+    title.textContent=`${asset}  ${exp}`; panel.appendChild(title);
+    const svg=ns("svg",{viewBox:"0 0 240 150",role:"img","aria-label":`${asset} ${exp} probability curve`});
+    panel.appendChild(svg);
+    panel.style.cursor="pointer";
+    panel.addEventListener("click",()=>{ // jump to detail focused on this market
+      state.asset=asset; state.exp=exp; setView("detail");
+    });
+    wrap.appendChild(svg.__panel=panel);
+    miniCDF(svg, groups[k].sort((a,b)=>a.strike-b.strike));
+  }
+}
+
+function miniCDF(svg, rs){
+  const W=240,H=150,m={l:26,r:6,t:6,b:20};
+  const ks=rs.map(r=>r.strike), kmin=Math.min(...ks), kmax=Math.max(...ks);
+  const pad=(kmax-kmin)*0.04||1;
+  const x=scale(kmin-pad,kmax+pad,m.l,W-m.r), y=scale(0,1,H-m.b,m.t);
+  for(let i=0;i<=4;i++){const g=i/4;
+    svg.appendChild(ns("line",{x1:m.l,y1:y(g),x2:W-m.r,y2:y(g),class:"gl"}));
+    svg.appendChild(ns("text",{x:m.l-4,y:y(g)+3,"text-anchor":"end",class:"axlbl",style:"font-size:9px"})).textContent=g.toFixed(1);
+  }
+  for(let i=0;i<=3;i++){const kv=kmin+(kmax-kmin)*i/3;
+    svg.appendChild(ns("text",{x:x(kv),y:H-m.b+13,"text-anchor":"middle",class:"axlbl",style:"font-size:9px"})).textContent=kv.toFixed(kmax<20?1:0);
+  }
+  svg.appendChild(ns("rect",{x:m.l,y:m.t,width:W-m.r-m.l,height:H-m.b-m.t,fill:"none",stroke:"var(--axis)","stroke-width":1}));
+  const spot=rs[0].spot;
+  if(isFinite(spot)&&spot>=kmin-pad&&spot<=kmax+pad)
+    svg.appendChild(ns("line",{x1:x(spot),y1:m.t,x2:x(spot),y2:H-m.b,stroke:"var(--spot)","stroke-width":1.2,"stroke-dasharray":"2 2"}));
+  let d="";rs.forEach((r,i)=>{d+=(i?"L":"M")+x(r.strike)+" "+y(r.opt);});
+  svg.appendChild(ns("path",{d,fill:"none",stroke:"var(--opt)","stroke-width":1.8}));
+  for(const r of rs){const c=ns("circle",{cx:x(r.strike),cy:y(r.pm),r:3,
+    fill:r.liquid?"var(--pm)":"var(--grid)",stroke:r.liquid?"var(--surface)":"var(--muted)","stroke-width":1,opacity:r.liquid?1:.8});
+    attachTip(c,r);svg.appendChild(c);}
+}
+
+// ---------- tooltip ----------
+function attachTip(el,r,tag){
+  el.addEventListener("mousemove",ev=>{
+    tip.innerHTML=`<div class="t">${r.asset} ${r.exp} · $${r.strike}${tag?" · "+tag:""}</div>`+
+      `<div class="r">PM YES <b>${fmtPct(r.pm)}</b></div>`+
+      `<div class="r">Option <b>${fmtPct(r.opt)}</b></div>`+
+      `<div class="r">PM − Opt <b style="color:${diffColor(r.diff)}">${fmtPP(r.diff)}</b></div>`+
+      `<div class="r">liquid <b>${r.liquid?"yes":"no"}</b></div>`;
+    tip.style.opacity=1;
+    const pad=14; let lx=ev.clientX+pad, ly=ev.clientY+pad;
+    if(lx+250>innerWidth)lx=ev.clientX-250; if(ly+120>innerHeight)ly=ev.clientY-120;
+    tip.style.left=lx+"px";tip.style.top=ly+"px";
+  });
+  el.addEventListener("mouseleave",()=>tip.style.opacity=0);
+}
+
+function setFocus(r){
+  state.focus={asset:r.asset,exp:r.exp,strike:r.strike};
+  state.asset=r.asset; state.exp=r.exp;
+  render();
+}
+
+function setView(v){
+  state.view=v;
+  $("#detailView").style.display = v==="detail"?"grid":"none";
+  $("#gridView").style.display   = v==="grid"?"block":"none";
+  document.querySelectorAll("#viewSeg button").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
+  render();
+}
+
+function stepPlay(){
+  const N=state.snaps.length;
+  if(N<2){stopPlay();return;}
+  state.pinned=false;
+  state.snapIdx = state.snapIdx>=N-1 ? 0 : state.snapIdx+1;  // loop
+  render();
+}
+function startPlay(){ if(state.playing)return; state.playing=true; $("#playBtn").textContent="⏸";
+  state.playTimer=setInterval(stepPlay,900); }
+function stopPlay(){ state.playing=false; $("#playBtn").textContent="▶";
+  if(state.playTimer)clearInterval(state.playTimer); state.playTimer=null; }
+
+// ---------- wiring ----------
+$("#selAsset").addEventListener("change",e=>{state.asset=e.target.value;state.exp=null;render();});
+$("#selExp").addEventListener("change",e=>{state.exp=e.target.value;render();});
+$("#chkLiquid").addEventListener("change",e=>{state.liquidOnly=e.target.checked;render();});
+$("#chkExact").addEventListener("change",e=>{state.exactOnly=e.target.checked;render();});
+$("#viewSeg").addEventListener("click",e=>{const b=e.target.closest("button");if(b)setView(b.dataset.view);});
+$("#slider").addEventListener("input",e=>{
+  state.snapIdx=+e.target.value;
+  state.pinned = state.snapIdx === state.snaps.length-1;  // re-pin only at the far right
+  stopPlay(); render();
+});
+$("#pinBtn").addEventListener("click",()=>{
+  state.pinned=!state.pinned; if(state.pinned){stopPlay();state.snapIdx=state.snaps.length-1;} render();
+});
+$("#playBtn").addEventListener("click",()=>{ state.playing?stopPlay():startPlay(); });
+$("#refreshBtn").addEventListener("click",()=>load());
+$("#selRefresh").addEventListener("change",e=>{state.refreshMs=+e.target.value;schedule();});
+$("#fileBtn").addEventListener("click",()=>$("#fileIn").click());
+$("#fileIn").addEventListener("change",e=>{const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();rd.onload=()=>load(rd.result);rd.readAsText(f);
+  $("#statustxt").textContent="file loaded";});
+$("#themeBtn").addEventListener("click",()=>{
+  const cur=document.documentElement.getAttribute("data-theme");
+  const next = cur==="dark"?"light":cur==="light"?"dark":
+    (matchMedia("(prefers-color-scheme: dark)").matches?"light":"dark");
+  document.documentElement.setAttribute("data-theme",next);
+  localStorage.setItem("pmviz-theme",next); render();
+});
+
+function schedule(){
+  if(state.timer)clearInterval(state.timer);
+  if(state.refreshMs>0) state.timer=setInterval(()=>load(),state.refreshMs);
+}
+
+function markPortable(builtAt){
+  $("#dot").className="dot";
+  $("#statustxt").textContent = "offline snapshot";
+  $("#selRefresh").value="0"; $("#selRefresh").disabled=true;
+  $("#refreshBtn").disabled=true; state.refreshMs=0;
+  if(builtAt) $("#snapinfo").title="portable copy built "+builtAt;
+}
+
+// init
+(function init(){
+  const saved=localStorage.getItem("pmviz-theme");
+  if(saved)document.documentElement.setAttribute("data-theme",saved);
+  window.addEventListener("resize",()=>state.rows.length&&render());
+  const embEl=document.getElementById("embedded-data");
+  const emb=embEl?embEl.textContent.trim():"";
+  if(emb.length>40){                 // a build baked the data in -> run offline
+    load(emb); markPortable(embEl.getAttribute("data-built"));
+  }else{
+    load(); schedule();              // live mode: fetch + auto-refresh
+  }
+})();
+</script>
+</body>
+</html>
