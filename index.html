@@ -147,8 +147,8 @@
 
   <div class="controls">
     <span class="seg" id="viewSeg">
-      <button data-view="detail" class="on">Detail</button>
-      <button data-view="grid">Overlay grid</button>
+      <button data-view="detail">Detail</button>
+      <button data-view="grid" class="on">Overlay grid</button>
     </span>
     <label>Focus asset
       <select id="selAsset"></select>
@@ -156,8 +156,8 @@
     <label>Expiration
       <select id="selExp"></select>
     </label>
-    <label><input type="checkbox" id="chkLiquid" checked> Liquid strikes only</label>
-    <label><input type="checkbox" id="chkExact" checked> Exact-comparable only</label>
+    <label><input type="checkbox" id="chkLiquid"> Liquid strikes only</label>
+    <label><input type="checkbox" id="chkExact"> Exact-comparable only</label>
     <span class="spacer"></span>
     <label>Refresh
       <select id="selRefresh">
@@ -264,10 +264,10 @@ const state = {
   lastGoodCount: 0,
   asset: "", exp: "",       // "" = "All" -- a real scope filter shared by every view
   focus: null,         // {asset,exp,strike} for history chart
-  liquidOnly: true, exactOnly: true,
+  liquidOnly: false, exactOnly: false,
   timer: null, refreshMs: 30000,
   links: {},           // "ASSET|EXP" -> polymarket event url
-  view: "detail",      // "detail" | "grid"
+  view: "grid",        // "detail" | "grid"
   snaps: [],           // sorted unique snapshot timestamps
   snapIdx: 0,          // which snapshot the "current" views show
   pinned: true,        // follow the newest snapshot as it arrives
@@ -814,8 +814,9 @@ function markPortable(builtAt){
 // init
 (function init(){
   const saved=localStorage.getItem("pmviz-theme");
-  if(saved)document.documentElement.setAttribute("data-theme",saved);
+  document.documentElement.setAttribute("data-theme", saved || "dark");  // default dark unless the user picked light before
   window.addEventListener("resize",()=>state.rows.length&&render());
+  setView(state.view);  // sync DOM to the default view (Overlay grid); no-ops render() since rows aren't loaded yet
   const embEl=document.getElementById("embedded-data");
   const emb=embEl?embEl.textContent.trim():"";
   if(emb.length>40){                 // a build baked the data in -> run offline
