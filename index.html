@@ -291,11 +291,16 @@ function parseCSV(text){
     if(c.length < head.length) continue;               // torn/partial line — skip
     const strike = +c[idx.strike], pm = +c[idx.pm_yes], opt = +c[idx.opt_prob];
     if(!isFinite(strike) || !isFinite(pm) || !isFinite(opt)) continue;
+    const opt2 = k=>(k in idx)?c[idx[k]]:undefined;   // optional (newer) columns
     out.push({
       ts: c[idx.snapshot_ts_utc],
       asset: c[idx.asset], exp: c[idx.expiration], tier: c[idx.tier],
       strike, pm, opt, spot:+c[idx.spot], diff:+c[idx.diff],
-      liquid: String(c[idx.liquid]).toLowerCase()==="true"
+      liquid: String(c[idx.liquid]).toLowerCase()==="true",
+      oneSided: String(opt2("pm_one_sided")).toLowerCase()==="true",
+      bid: parseFloat(opt2("pm_bid")), ask: parseFloat(opt2("pm_ask")),
+      spread: parseFloat(opt2("pm_spread")),
+      liquidBasis: opt2("liquid_basis") || null   // "book" | "volume_backfill" | "current_book_backfill" | null(older rows)
     });
   }
   if(!out.length) throw new Error("no data rows");
@@ -410,7 +415,7 @@ function render(){
 
   buildSelectors(cur);
   const kpiRows = cur.filter(r => (!state.exactOnly||EXACT_TIERS.has(r.tier)) && r.liquid);
-  drawKPIs(stats(kpiRows), cur);
+  drawKPIs(stats(kpiRows), kpiRows);
 
   if(state.view==="grid"){
     $("#gridTs").textContent = tsShort(cts)+(atLatest?" (latest)":"");
@@ -459,9 +464,10 @@ function buildSelectors(latest){
     : "";
 }
 
-function drawKPIs(s, latest){
-  const arb = latest.filter(r=>EXACT_TIERS.has(r.tier)&&r.liquid)
-                    .reduce((m,r)=>Math.abs(r.diff)>Math.abs(m.diff)?r:m,{diff:0});
+function drawKPIs(s, liquidRows){
+  // liquidRows is ALREADY filtered to (liquid && tier-if-toggled) by the caller --
+  // every KPI including Widest gap must come from that same set, never a wider one.
+  const arb = liquidRows.reduce((m,r)=>Math.abs(r.diff)>Math.abs(m.diff)?r:m,{diff:0});
   const cards=[
     ["Liquid strikes", s.n||0, "exact-comparable"],
     ["MAE", s.n?fmtPct(s.mae):"—", "mean |PM−opt|"],
@@ -563,7 +569,11 @@ function drawTable(rows){
       `<td>${isFinite(r.spot)?r.spot.toFixed(2):"—"}</td>`+
       `<td>${fmtPct(r.pm)}</td><td>${fmtPct(r.opt)}</td>`+
       `<td class="diffcell" style="color:${diffColor(r.diff)}">${fmtPP(r.diff)}</td>`+
-      `<td>${r.liquid?'<span class="pill" style="background:color-mix(in srgb,var(--good) 20%,transparent);color:var(--good)">liq</span>':'<span class="pill fade">—</span>'}</td>`;
+      `<td>${r.liquid
+        ? '<span class="pill" style="background:color-mix(in srgb,var(--good) 20%,transparent);color:var(--good)">liq</span>'
+        : r.oneSided
+          ? '<span class="pill" style="background:color-mix(in srgb,var(--warn) 24%,transparent);color:var(--warn)" title="one-sided book: no bids or no asks — the mid is not a real price">1-sided</span>'
+          : '<span class="pill fade">—</span>'}</td>`;
     tr.addEventListener("click",()=>setFocus(r));
     tb.appendChild(tr);
   }
@@ -674,11 +684,22 @@ function miniCDF(svg, rs){
 // ---------- tooltip ----------
 function attachTip(el,r,tag){
   el.addEventListener("mousemove",ev=>{
+    const book = (isFinite(r.bid)||isFinite(r.ask))
+      ? `<div class="r">bid / ask <b>${isFinite(r.bid)?fmtPct(r.bid):"—"} / ${isFinite(r.ask)?fmtPct(r.ask):"—"}</b></div>` : "";
+    const warn = r.oneSided
+      ? `<div class="r" style="color:var(--warn)"><b>⚠ one-sided book</b></div>` : "";
+    const basisNote = {
+      volume_backfill: "backfilled: never traded (candle history)",
+      current_book_backfill: "backfilled: illiquid per current book",
+      book: null   // real, point-in-time order-book read -- no caveat needed
+    }[r.liquidBasis];
+    const basis = basisNote
+      ? `<div class="r" style="color:var(--muted)"><span>${basisNote}</span></div>` : "";
     tip.innerHTML=`<div class="t">${r.asset} ${r.exp} · $${r.strike}${tag?" · "+tag:""}</div>`+
-      `<div class="r">PM YES <b>${fmtPct(r.pm)}</b></div>`+
+      `<div class="r">PM YES <b>${fmtPct(r.pm)}</b></div>`+ book +
       `<div class="r">Option <b>${fmtPct(r.opt)}</b></div>`+
       `<div class="r">PM − Opt <b style="color:${diffColor(r.diff)}">${fmtPP(r.diff)}</b></div>`+
-      `<div class="r">liquid <b>${r.liquid?"yes":"no"}</b></div>`;
+      `<div class="r">liquid <b>${r.liquid?"yes":(r.oneSided?"no (1-sided)":"no")}</b></div>`+ warn + basis;
     tip.style.opacity=1;
     const pad=14; let lx=ev.clientX+pad, ly=ev.clientY+pad;
     if(lx+250>innerWidth)lx=ev.clientX-250; if(ly+120>innerHeight)ly=ev.clientY-120;
